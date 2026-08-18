@@ -1,0 +1,7 @@
+{
+  "CONTROL_SERVER": "wss://pc.example.com/ws",
+  "AGENT_TOKEN": "replace-with-a-long-random-token",
+  "DEVICE_ID": "pc-marketing-01",
+  "DEVICE_GROUP": "Marketing",
+  "FRAME_INTERVAL_MS": 800
+}
