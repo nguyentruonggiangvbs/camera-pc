@@ -15,12 +15,12 @@ $ErrorActionPreference = 'Stop'
 $installDir = "$env:ProgramData\CameraPC"
 $startupDir = [Environment]::GetFolderPath('Startup')
 $startupCmd = Join-Path $startupDir 'CameraPC-Agent.cmd'
-
 New-Item -ItemType Directory -Force -Path $installDir | Out-Null
 
 $repoBase = 'https://raw.githubusercontent.com/nguyentruonggiangvbs/camera-pc/main/agent'
-Invoke-WebRequest -UseBasicParsing -Uri "$repoBase/pc-agent.ps1" -OutFile (Join-Path $installDir 'pc-agent.ps1')
-Invoke-WebRequest -UseBasicParsing -Uri "$repoBase/supervisor.ps1" -OutFile (Join-Path $installDir 'supervisor.ps1')
+foreach ($file in @('pc-agent.ps1','supervisor.ps1','auto-updater.ps1','update-agent.ps1','version.txt')) {
+  Invoke-WebRequest -UseBasicParsing -Uri "$repoBase/$file" -OutFile (Join-Path $installDir $file)
+}
 
 $config = [ordered]@{
   CONTROL_SERVER = $Server
@@ -33,13 +33,15 @@ $config = [ordered]@{
   LIVE_JPEG_QUALITY = $LiveJpegQuality
   THUMB_SCALE = $ThumbScale
   LIVE_SCALE = $LiveScale
+  AUTO_UPDATE = $true
   AGENT_PATH = (Join-Path $installDir 'pc-agent.ps1')
 }
-$config | ConvertTo-Json -Depth 4 | Set-Content -Path (Join-Path $installDir 'config.json') -Encoding UTF8
+$config | ConvertTo-Json -Depth 5 | Set-Content -Path (Join-Path $installDir 'config.json') -Encoding UTF8
 
 $cmdLines = @(
   '@echo off',
-  'start "CameraPC Agent" /min powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%ProgramData%\CameraPC\supervisor.ps1"'
+  'start "CameraPC Agent" /min powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%ProgramData%\CameraPC\supervisor.ps1"',
+  'start "CameraPC Updater" /min powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%ProgramData%\CameraPC\auto-updater.ps1"'
 )
 $cmdLines | Set-Content -Path $startupCmd -Encoding ASCII
 
@@ -47,16 +49,15 @@ Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction Silen
   Where-Object { $_.CommandLine -like '*CameraPC*' } |
   ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop } catch {} }
 
-Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @(
-  '-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $installDir 'supervisor.ps1')
-)
+Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $installDir 'supervisor.ps1'))
+Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $installDir 'auto-updater.ps1'))
 
 Write-Host ''
 Write-Host 'CameraPC Agent installed successfully.' -ForegroundColor Green
 Write-Host "Device: $DeviceId"
 Write-Host "Server: $Server"
 Write-Host "Group: $Group"
-Write-Host "Live profile: ${LiveFrameIntervalMs}ms, JPEG ${LiveJpegQuality}, scale ${LiveScale}"
+Write-Host "Version: $((Get-Content -Raw (Join-Path $installDir 'version.txt')).Trim())"
+Write-Host 'Automatic updates: ON'
 Write-Host "Startup: $startupCmd"
-Write-Host 'The agent auto-starts after Windows sign-in, reconnects forever, and restarts automatically if it exits.'
 Write-Host ''
