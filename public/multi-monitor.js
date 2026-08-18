@@ -10,15 +10,43 @@
     .device-thumb.multi-monitor-thumb .monitor-thumb{position:relative;min-width:0;overflow:hidden;background:#081522;display:grid;place-items:center}
     .device-thumb.multi-monitor-thumb .monitor-thumb img{width:100%;height:100%;object-fit:cover;display:block}
     .device-thumb.multi-monitor-thumb .monitor-badge,.multi-monitor-cell .monitor-badge{position:absolute;left:6px;top:6px;background:rgba(0,0,0,.68);color:#dcecff;border-radius:5px;padding:3px 6px;font-size:8px;z-index:2}
+    .monitor-fullscreen-btn,.remote-fullscreen-btn{position:absolute;right:7px;top:7px;z-index:5;width:30px;height:30px;border:1px solid rgba(255,255,255,.18);border-radius:7px;background:rgba(0,0,0,.62);color:#fff;display:grid;place-items:center;padding:0;font-size:16px;line-height:1;cursor:pointer;backdrop-filter:blur(5px)}
+    .monitor-fullscreen-btn:hover,.remote-fullscreen-btn:hover{background:rgba(35,135,255,.9);border-color:#5da8ff}
     .remote-surface.multi-monitor-active{display:block;aspect-ratio:auto;min-height:260px;padding:6px}
     .multi-monitor-remote-grid{width:100%;height:100%;display:grid;grid-template-columns:repeat(var(--cols,1),minmax(0,1fr));gap:6px}
     .multi-monitor-cell{position:relative;min-height:180px;background:#03070c;border:2px solid transparent;border-radius:7px;overflow:hidden;display:grid;place-items:center;cursor:pointer}
     .multi-monitor-cell.selected{border-color:#2f92ff;box-shadow:0 0 0 1px rgba(47,146,255,.28) inset}
     .multi-monitor-cell img{width:100%;height:100%;object-fit:contain;display:block}
     .multi-monitor-cell .no-frame{color:#71889d;font-size:11px}
+    .multi-monitor-cell:fullscreen{background:#000;border:0;border-radius:0;width:100vw;height:100vh;display:grid;place-items:center}
+    .multi-monitor-cell:fullscreen img{width:100vw;height:100vh;object-fit:contain}
+    .multi-monitor-cell:fullscreen .monitor-badge{font-size:12px;padding:6px 10px}
+    .multi-monitor-cell:fullscreen .monitor-fullscreen-btn{position:fixed;right:18px;top:18px;width:42px;height:42px;font-size:22px}
+    .remote-surface:fullscreen{background:#000;width:100vw;height:100vh;margin:0;border:0;border-radius:0;display:grid;place-items:center}
+    .remote-surface:fullscreen>img{width:100vw!important;height:100vh!important;object-fit:contain!important}
+    .remote-surface:fullscreen .remote-fullscreen-btn{position:fixed;right:18px;top:18px;width:42px;height:42px;font-size:22px}
     @media(max-width:900px){.multi-monitor-remote-grid{grid-template-columns:1fr!important}.multi-monitor-cell{min-height:200px}}
   `;
   document.head.appendChild(style);
+
+  function toggleFullscreen(element) {
+    if (!element) return;
+    if (document.fullscreenElement === element) {
+      document.exitFullscreen?.().catch(() => {});
+      return;
+    }
+    element.requestFullscreen?.().catch(() => {});
+  }
+
+  function fullscreenButton(className = 'monitor-fullscreen-btn') {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = className;
+    btn.title = 'Xem toàn màn hình';
+    btn.setAttribute('aria-label', 'Xem toàn màn hình');
+    btn.textContent = '⛶';
+    return btn;
+  }
 
   function mapFor(deviceId) {
     if (!monitorFrames.has(deviceId)) monitorFrames.set(deviceId, new Map());
@@ -66,6 +94,18 @@
     }
   }
 
+  function ensureSingleMonitorFullscreen() {
+    const remote = document.getElementById('remoteSurface');
+    if (!remote || remote.querySelector('.remote-fullscreen-btn')) return;
+    const btn = fullscreenButton('remote-fullscreen-btn');
+    btn.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      toggleFullscreen(remote);
+    });
+    remote.appendChild(btn);
+  }
+
   function renderRemote(deviceId) {
     if (!deviceId) return;
     const count = monitorCountFor(deviceId);
@@ -84,9 +124,11 @@
       remote.querySelector('.multi-monitor-remote-grid')?.remove();
       const img = document.getElementById('remoteImage');
       if (img && frames.get(0)?.src) img.src = frames.get(0).src;
+      ensureSingleMonitorFullscreen();
       return;
     }
 
+    remote.querySelector('.remote-fullscreen-btn')?.remove();
     remote.classList.add('multi-monitor-active');
     const originalImg = document.getElementById('remoteImage');
     const placeholder = document.getElementById('remotePlaceholder');
@@ -123,6 +165,15 @@
       badge.className = 'monitor-badge';
       badge.textContent = `Màn hình ${i + 1}${meta?.screens?.[i]?.primary ? ' · Chính' : ''}`;
       cell.appendChild(badge);
+
+      const fullBtn = fullscreenButton();
+      fullBtn.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        selectedMonitorIndex = i;
+        toggleFullscreen(cell);
+      });
+      cell.appendChild(fullBtn);
       grid.appendChild(cell);
     }
   }
@@ -168,6 +219,13 @@
     if (socket) hookSocket(socket);
   }, 250);
 
+  document.addEventListener('fullscreenchange', () => {
+    document.querySelectorAll('.monitor-fullscreen-btn,.remote-fullscreen-btn').forEach(btn => {
+      btn.textContent = document.fullscreenElement ? '✕' : '⛶';
+      btn.title = document.fullscreenElement ? 'Thoát toàn màn hình' : 'Xem toàn màn hình';
+    });
+  });
+
   document.addEventListener('click', (event) => {
     const card = event.target.closest('.device-card');
     if (card) {
@@ -175,7 +233,7 @@
       setTimeout(() => renderRemote(card.dataset.deviceId), 30);
     }
     const monitorCell = event.target.closest('.multi-monitor-cell');
-    if (monitorCell) {
+    if (monitorCell && !event.target.closest('.monitor-fullscreen-btn')) {
       selectedMonitorIndex = Number(monitorCell.dataset.monitorIndex || 0);
       const id = selectedDeviceId();
       if (id) renderRemote(id);
@@ -195,7 +253,10 @@
 
   const remote = document.getElementById('remoteSurface');
   if (remote) {
+    ensureSingleMonitorFullscreen();
+
     remote.addEventListener('pointerdown', (event) => {
+      if (event.target.closest('.monitor-fullscreen-btn,.remote-fullscreen-btn')) return;
       const id = selectedDeviceId();
       if (!id || monitorCountFor(id) <= 1 || !controlEnabled) return;
       const cell = event.target.closest('.multi-monitor-cell');
@@ -212,6 +273,7 @@
     }, true);
 
     remote.addEventListener('dblclick', (event) => {
+      if (event.target.closest('.monitor-fullscreen-btn,.remote-fullscreen-btn')) return;
       const id = selectedDeviceId();
       if (!id || monitorCountFor(id) <= 1 || !controlEnabled) return;
       const cell = event.target.closest('.multi-monitor-cell');
