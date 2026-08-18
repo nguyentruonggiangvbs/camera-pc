@@ -11,7 +11,7 @@ $ErrorActionPreference = 'Stop'
 if (-not $Server) { $Server = 'ws://127.0.0.1:3000/ws' }
 if (-not $Token) { $Token = 'change-agent-token' }
 if (-not $DeviceId) { $DeviceId = $env:COMPUTERNAME }
-if (-not $Group) { $Group = 'Văn phòng' }
+if (-not $Group) { $Group = 'VanPhong' }
 
 Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName System.Windows.Forms
@@ -172,8 +172,8 @@ function Click-Pointer($Args, [bool]$Double = $false) {
 
 function Open-Url([string]$Url) {
   $uri = $null
-  if (-not [Uri]::TryCreate($Url, [UriKind]::Absolute, [ref]$uri)) { throw 'URL không hợp lệ' }
-  if ($uri.Scheme -notin @('http','https')) { throw 'Chỉ cho phép http/https' }
+  if (-not [Uri]::TryCreate($Url, [UriKind]::Absolute, [ref]$uri)) { throw 'Invalid URL' }
+  if ($uri.Scheme -notin @('http','https')) { throw 'Only http/https URLs are allowed' }
 
   $chromeCandidates = @(
     "$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
@@ -216,13 +216,13 @@ function Handle-Command {
       'openUrl' { Open-Url ([string]$args.url) }
       'screenshot' { Send-Frame $Socket }
       'ping' { }
-      default { throw "Lệnh không hỗ trợ: $cmd" }
+      default { throw "Unsupported command: $cmd" }
     }
 
     Send-Json $Socket @{
       type = 'agent:event'
       event = 'command:done'
-      detail = "Hoàn tất: $cmd"
+      detail = "Completed: $cmd"
       ok = $true
       commandId = $Message.commandId
     }
@@ -230,7 +230,7 @@ function Handle-Command {
     Send-Json $Socket @{
       type = 'agent:event'
       event = 'command:error'
-      detail = "Lỗi $cmd`: $($_.Exception.Message)"
+      detail = "Command failed $cmd`: $($_.Exception.Message)"
       ok = $false
       commandId = $Message.commandId
     }
@@ -240,15 +240,15 @@ function Handle-Command {
 Write-Host ''
 Write-Host '============================================================' -ForegroundColor Cyan
 Write-Host ' PC CONTROL CENTER AGENT' -ForegroundColor Cyan
-Write-Host ' Agent này cho phép xem và điều khiển máy tính từ Control Center.'
-Write-Host ' Chỉ chạy trên máy đã được phép quản trị. Nhấn Ctrl+C để dừng.'
+Write-Host ' This agent allows viewing and controlling this PC from Control Center.'
+Write-Host ' Run only on PCs you own or are authorized to manage. Press Ctrl+C to stop.'
 Write-Host '============================================================' -ForegroundColor Cyan
 Write-Host ''
 
 while ($true) {
   $socket = New-Object System.Net.WebSockets.ClientWebSocket
   try {
-    Write-AgentLog "Đang kết nối $Server ..."
+    Write-AgentLog "Connecting to $Server ..."
     $socket.ConnectAsync([Uri]$Server, [System.Threading.CancellationToken]::None).Wait()
 
     $screen = Get-ScreenInfo
@@ -264,7 +264,7 @@ while ($true) {
       hostname = $env:COMPUTERNAME
       screen = $screen
     }
-    Write-AgentLog "Đã kết nối. Device ID: $DeviceId"
+    Write-AgentLog "Connected. Device ID: $DeviceId"
 
     $buffer = New-Object byte[] 65536
     $segment = New-Object System.ArraySegment[byte] -ArgumentList @(,$buffer)
@@ -276,7 +276,7 @@ while ($true) {
       $now = Get-Date
 
       if ($now -ge $nextFrame) {
-        try { Send-Frame $socket } catch { Write-AgentLog "Không gửi được frame: $($_.Exception.Message)" }
+        try { Send-Frame $socket } catch { Write-AgentLog "Frame send failed: $($_.Exception.Message)" }
         $nextFrame = $now.AddMilliseconds([Math]::Max(250, $FrameIntervalMs))
       }
 
@@ -303,7 +303,7 @@ while ($true) {
             $msg = $text | ConvertFrom-Json
             if ($msg.type -eq 'control:command') { Handle-Command $socket $msg }
           } catch {
-            Write-AgentLog "Bỏ qua message lỗi: $($_.Exception.Message)"
+            Write-AgentLog "Ignoring invalid message: $($_.Exception.Message)"
           }
         }
         $receiveTask = $null
@@ -312,11 +312,11 @@ while ($true) {
       Start-Sleep -Milliseconds 20
     }
   } catch {
-    Write-AgentLog "Mất kết nối: $($_.Exception.Message)"
+    Write-AgentLog "Disconnected: $($_.Exception.Message)"
   } finally {
     try { $socket.Dispose() } catch { }
   }
 
-  Write-AgentLog 'Thử kết nối lại sau 3 giây...'
+  Write-AgentLog 'Reconnect in 3 seconds...'
   Start-Sleep -Seconds 3
 }
