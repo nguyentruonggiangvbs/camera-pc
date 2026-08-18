@@ -1,7 +1,8 @@
 {
-  "CONTROL_SERVER": "wss://pc.example.com/ws",
-  "AGENT_TOKEN": "replace-with-a-long-random-token",
-  "DEVICE_ID": "pc-marketing-01",
-  "DEVICE_GROUP": "Marketing",
-  "FRAME_INTERVAL_MS": 800
+  "CONTROL_SERVER": "ws://187.127.124.155:3000/ws",
+  "AGENT_TOKEN": "replace-with-agent-token",
+  "DEVICE_ID": "PC-01",
+  "DEVICE_GROUP": "VanPhong",
+  "FRAME_INTERVAL_MS": 800,
+  "AGENT_PATH": "C:\\ProgramData\\CameraPC\\pc-agent.ps1"
 }
