@@ -45,22 +45,50 @@ function Write-AgentLog([string]$Message) {
 
 function Send-Json {
   param([System.Net.WebSockets.ClientWebSocket]$Socket, [hashtable]$Payload)
-  $json = $Payload | ConvertTo-Json -Depth 8 -Compress
+  $json = $Payload | ConvertTo-Json -Depth 10 -Compress
   $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
   $segment = New-Object System.ArraySegment[byte] -ArgumentList @(,$bytes)
   $task = $Socket.SendAsync($segment, [System.Net.WebSockets.WebSocketMessageType]::Text, $true, [System.Threading.CancellationToken]::None)
   $task.Wait()
 }
 
-function Get-ScreenInfo {
-  $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-  return @{ width = $bounds.Width; height = $bounds.Height }
+function Get-ScreensInfo {
+  $result = @()
+  $screens = [System.Windows.Forms.Screen]::AllScreens
+  for ($i = 0; $i -lt $screens.Count; $i++) {
+    $s = $screens[$i]
+    $result += @{
+      index = $i
+      id = [string]$s.DeviceName
+      primary = [bool]$s.Primary
+      x = [int]$s.Bounds.X
+      y = [int]$s.Bounds.Y
+      width = [int]$s.Bounds.Width
+      height = [int]$s.Bounds.Height
+    }
+  }
+  return ,$result
+}
+
+function Get-PrimaryScreenInfo {
+  $screens = Get-ScreensInfo
+  $primary = $screens | Where-Object { $_.primary } | Select-Object -First 1
+  if (-not $primary) { $primary = $screens | Select-Object -First 1 }
+  return $primary
+}
+
+function Get-ScreenByIndex([int]$Index) {
+  $screens = [System.Windows.Forms.Screen]::AllScreens
+  if ($screens.Count -le 0) { throw 'No screens detected' }
+  if ($Index -lt 0 -or $Index -ge $screens.Count) { $Index = 0 }
+  return $screens[$Index]
 }
 
 function Get-ScreenFrame {
-  param([int]$Quality, [double]$Scale)
+  param([int]$MonitorIndex, [int]$Quality, [double]$Scale)
 
-  $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+  $screen = Get-ScreenByIndex $MonitorIndex
+  $bounds = $screen.Bounds
   $scaleSafe = [Math]::Max(0.25, [Math]::Min(1.0, $Scale))
   $targetWidth = [Math]::Max(320, [int][Math]::Round($bounds.Width * $scaleSafe))
   $targetHeight = [Math]::Max(180, [int][Math]::Round($bounds.Height * $scaleSafe))
@@ -68,7 +96,7 @@ function Get-ScreenFrame {
   $source = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
   $gSource = [System.Drawing.Graphics]::FromImage($source)
   try {
-    $gSource.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+    $gSource.CopyFromScreen($bounds.X, $bounds.Y, 0, 0, $bounds.Size)
     $target = New-Object System.Drawing.Bitmap $targetWidth, $targetHeight
     $gTarget = [System.Drawing.Graphics]::FromImage($target)
     try {
@@ -91,13 +119,11 @@ function Get-ScreenFrame {
             data = [Convert]::ToBase64String($stream.ToArray())
             width = $targetWidth
             height = $targetHeight
+            sourceWidth = $bounds.Width
+            sourceHeight = $bounds.Height
           }
-        } finally {
-          $params.Dispose()
-        }
-      } finally {
-        $stream.Dispose()
-      }
+        } finally { $params.Dispose() }
+      } finally { $stream.Dispose() }
     } finally {
       $gTarget.Dispose()
       $target.Dispose()
@@ -108,18 +134,32 @@ function Get-ScreenFrame {
   }
 }
 
-function Send-Frame {
-  param([System.Net.WebSockets.ClientWebSocket]$Socket, [switch]$ForceLive)
+function Send-MonitorFrame {
+  param([System.Net.WebSockets.ClientWebSocket]$Socket, [int]$MonitorIndex, [switch]$ForceLive)
   $isLive = $ForceLive -or $script:StreamMode -eq 'live'
   $quality = if ($isLive) { $LiveQuality } else { $ThumbQuality }
   $scale = if ($isLive) { $LiveScale } else { $ThumbScale }
-  $frame = Get-ScreenFrame -Quality $quality -Scale $scale
+  $frame = Get-ScreenFrame -MonitorIndex $MonitorIndex -Quality $quality -Scale $scale
+  $screenInfo = (Get-ScreensInfo)[$MonitorIndex]
   Send-Json $Socket @{
     type = 'agent:frame'
+    monitorIndex = $MonitorIndex
+    monitorId = $screenInfo.id
+    monitorPrimary = $screenInfo.primary
     width = $frame.width
     height = $frame.height
+    sourceWidth = $frame.sourceWidth
+    sourceHeight = $frame.sourceHeight
     mode = if ($isLive) { 'live' } else { 'thumbnail' }
     data = $frame.data
+  }
+}
+
+function Send-AllFrames {
+  param([System.Net.WebSockets.ClientWebSocket]$Socket, [switch]$ForceLive)
+  $screens = Get-ScreensInfo
+  for ($i = 0; $i -lt $screens.Count; $i++) {
+    Send-MonitorFrame -Socket $Socket -MonitorIndex $i -ForceLive:$ForceLive
   }
 }
 
@@ -153,11 +193,14 @@ function Send-KeyCommand($Args) {
 }
 
 function Move-Pointer($Args) {
-  $screen = Get-ScreenInfo
+  $monitorIndex = 0
+  if ($null -ne $Args.monitorIndex) { $monitorIndex = [int]$Args.monitorIndex }
+  $screen = Get-ScreenByIndex $monitorIndex
+  $bounds = $screen.Bounds
   $xNorm = [Math]::Max(0, [Math]::Min(1, [double]$Args.x))
   $yNorm = [Math]::Max(0, [Math]::Min(1, [double]$Args.y))
-  $x = [int][Math]::Round(($screen.width - 1) * $xNorm)
-  $y = [int][Math]::Round(($screen.height - 1) * $yNorm)
+  $x = $bounds.X + [int][Math]::Round(($bounds.Width - 1) * $xNorm)
+  $y = $bounds.Y + [int][Math]::Round(($bounds.Height - 1) * $yNorm)
   [void][PcControlNative]::SetCursorPos($x, $y)
 }
 
@@ -203,7 +246,10 @@ function Handle-Command {
       'key' { Send-KeyCommand $args }
       'text' { [System.Windows.Forms.SendKeys]::SendWait((Escape-SendKeysText ([string]$args.text))) }
       'openUrl' { Open-Url ([string]$args.url) }
-      'screenshot' { Send-Frame $Socket -ForceLive }
+      'screenshot' {
+        if ($null -ne $args.monitorIndex) { Send-MonitorFrame $Socket ([int]$args.monitorIndex) -ForceLive }
+        else { Send-AllFrames $Socket -ForceLive }
+      }
       'ping' { }
       default { throw "Unsupported command: $cmd" }
     }
@@ -220,13 +266,14 @@ while ($true) {
   try {
     Write-AgentLog "Connecting to $Server ..."
     $socket.ConnectAsync([Uri]$Server,[System.Threading.CancellationToken]::None).Wait()
-    $screen = Get-ScreenInfo
+    $screens = Get-ScreensInfo
+    $primary = Get-PrimaryScreenInfo
     Send-Json $socket @{
       type='auth'; role='agent'; token=$Token; deviceId=$DeviceId; name=$env:COMPUTERNAME; group=$Group;
       platform="Windows $([Environment]::OSVersion.Version)"; username="$env:USERDOMAIN\$env:USERNAME";
-      hostname=$env:COMPUTERNAME; screen=$screen
+      hostname=$env:COMPUTERNAME; screen=$primary; screens=$screens
     }
-    Write-AgentLog "Connected. Device ID: $DeviceId"
+    Write-AgentLog "Connected. Device ID: $DeviceId. Monitors: $($screens.Count)"
 
     $script:StreamMode = 'thumbnail'
     $buffer = New-Object byte[] 131072
@@ -238,19 +285,18 @@ while ($true) {
     while ($socket.State -eq [System.Net.WebSockets.WebSocketState]::Open) {
       $now = Get-Date
       if ($now -ge $nextFrame) {
-        try { Send-Frame $socket } catch { Write-AgentLog "Frame send failed: $($_.Exception.Message)" }
+        try { Send-AllFrames $socket } catch { Write-AgentLog "Frame send failed: $($_.Exception.Message)" }
         $interval = if ($script:StreamMode -eq 'live') { [Math]::Max(100,$LiveIntervalMs) } else { [Math]::Max(1000,$ThumbIntervalMs) }
         $nextFrame = (Get-Date).AddMilliseconds($interval)
       }
 
       if ($now -ge $nextStatus) {
-        Send-Json $socket @{ type='agent:status'; cpu=0; ram=0; screen=Get-ScreenInfo }
+        $screens = Get-ScreensInfo
+        Send-Json $socket @{ type='agent:status'; cpu=0; ram=0; screen=Get-PrimaryScreenInfo; screens=$screens }
         $nextStatus = $now.AddSeconds(10)
       }
 
-      if (-not $receiveTask) {
-        $receiveTask = $socket.ReceiveAsync($segment,[System.Threading.CancellationToken]::None)
-      }
+      if (-not $receiveTask) { $receiveTask = $socket.ReceiveAsync($segment,[System.Threading.CancellationToken]::None) }
 
       if ($receiveTask.IsCompleted) {
         $result = $receiveTask.Result
@@ -269,9 +315,7 @@ while ($true) {
                 Write-AgentLog "Stream mode: $newMode"
               }
             }
-          } catch {
-            Write-AgentLog "Ignoring invalid message: $($_.Exception.Message)"
-          }
+          } catch { Write-AgentLog "Ignoring invalid message: $($_.Exception.Message)" }
         }
         $receiveTask = $null
       }
