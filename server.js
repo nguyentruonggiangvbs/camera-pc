@@ -14,13 +14,9 @@ const SETTINGS_FILE = path.join(DATA_DIR, 'device-settings.json');
 fs.mkdirSync(DATA_DIR, { recursive: true });
 
 function readSettings() {
-  try {
-    return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')) || {};
-  } catch (_) {
-    return {};
-  }
+  try { return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')) || {}; }
+  catch (_) { return {}; }
 }
-
 let deviceSettings = readSettings();
 function saveSettings() {
   const tmp = `${SETTINGS_FILE}.tmp`;
@@ -35,10 +31,7 @@ app.use(express.static(path.join(__dirname, 'public'), {
   etag: true,
   maxAge: process.env.NODE_ENV === 'production' ? '1m' : 0
 }));
-
-app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, service: 'camera-pc-control-center', time: new Date().toISOString() });
-});
+app.get('/api/health', (_req, res) => res.json({ ok: true, service: 'camera-pc-control-center', time: new Date().toISOString() }));
 
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 10 * 1024 * 1024 });
@@ -46,19 +39,20 @@ const devices = new Map();
 const admins = new Set();
 
 function safeSend(ws, payload) {
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify(payload));
-  }
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload));
 }
-
 function now() { return new Date().toISOString(); }
+function settingFor(id) { return deviceSettings[id] || {}; }
 
-function settingFor(id) {
-  return deviceSettings[id] || {};
+function normalizeScreens(device) {
+  if (Array.isArray(device.screens) && device.screens.length) return device.screens;
+  if (device.screen) return [{ index: 0, id: 'primary', primary: true, x: 0, y: 0, width: device.screen.width, height: device.screen.height }];
+  return [];
 }
 
 function deviceSummary(device) {
   const saved = settingFor(device.id);
+  const screens = normalizeScreens(device);
   return {
     id: device.id,
     name: saved.alias || device.agentName || device.id,
@@ -68,7 +62,9 @@ function deviceSummary(device) {
     platform: device.platform || 'Windows',
     username: device.username || '',
     hostname: device.hostname || '',
-    screen: device.screen || null,
+    screen: device.screen || screens.find(s => s.primary) || screens[0] || null,
+    screens,
+    monitorCount: screens.length || 1,
     ip: device.ip || '',
     cpu: device.cpu ?? null,
     ram: device.ram ?? null,
@@ -82,24 +78,15 @@ function broadcastDeviceList() {
   const payload = { type: 'device:list', devices: Array.from(devices.values()).map(deviceSummary) };
   for (const admin of admins) safeSend(admin.socket, payload);
 }
-
 function broadcastLog(message, level = 'info', deviceId = null) {
   const payload = { type: 'log', id: crypto.randomUUID(), at: now(), level, deviceId, message };
   for (const admin of admins) safeSend(admin.socket, payload);
 }
-
-function closeWith(ws, code, reason) {
-  try { ws.close(code, reason); } catch (_) {}
-}
-
+function closeWith(ws, code, reason) { try { ws.close(code, reason); } catch (_) {} }
 function setAgentStreamMode(device) {
   if (!device?.socket || device.socket.readyState !== WebSocket.OPEN) return;
-  safeSend(device.socket, {
-    type: 'control:stream',
-    mode: device.subscribers?.size ? 'live' : 'thumbnail'
-  });
+  safeSend(device.socket, { type: 'control:stream', mode: device.subscribers?.size ? 'live' : 'thumbnail' });
 }
-
 function unsubscribeAdmin(adminWs) {
   const oldId = adminWs.subscribedDeviceId;
   if (!oldId) return;
@@ -118,9 +105,7 @@ wss.on('connection', (ws, req) => {
   ws.subscribedDeviceId = null;
   ws.on('pong', () => { ws.isAlive = true; });
 
-  const authTimeout = setTimeout(() => {
-    if (!ws.authenticated) closeWith(ws, 4001, 'Authentication timeout');
-  }, 8000);
+  const authTimeout = setTimeout(() => { if (!ws.authenticated) closeWith(ws, 4001, 'Authentication timeout'); }, 8000);
 
   ws.on('message', (buffer) => {
     let msg;
@@ -128,10 +113,7 @@ wss.on('connection', (ws, req) => {
     catch (_) { safeSend(ws, { type: 'error', message: 'Invalid JSON' }); return; }
 
     if (!ws.authenticated) {
-      if (msg.type !== 'auth') {
-        safeSend(ws, { type: 'error', message: 'Authenticate first' });
-        return;
-      }
+      if (msg.type !== 'auth') { safeSend(ws, { type: 'error', message: 'Authenticate first' }); return; }
 
       if (msg.role === 'admin' && msg.token === ADMIN_TOKEN) {
         clearTimeout(authTimeout);
@@ -148,16 +130,13 @@ wss.on('connection', (ws, req) => {
       if (msg.role === 'agent' && msg.token === AGENT_TOKEN) {
         const deviceId = String(msg.deviceId || '').trim();
         if (!deviceId) { closeWith(ws, 4002, 'Missing deviceId'); return; }
-
         clearTimeout(authTimeout);
         ws.authenticated = true;
         ws.role = 'agent';
         ws.deviceId = deviceId;
 
         const existing = devices.get(deviceId);
-        if (existing?.socket && existing.socket.readyState === WebSocket.OPEN) {
-          closeWith(existing.socket, 4003, 'Replaced by newer agent connection');
-        }
+        if (existing?.socket && existing.socket.readyState === WebSocket.OPEN) closeWith(existing.socket, 4003, 'Replaced by newer agent connection');
 
         const device = {
           id: deviceId,
@@ -167,15 +146,14 @@ wss.on('connection', (ws, req) => {
           username: msg.username || '',
           hostname: msg.hostname || '',
           screen: msg.screen || null,
+          screens: Array.isArray(msg.screens) ? msg.screens : null,
           ip: req.socket.remoteAddress || '',
           cpu: null,
           ram: null,
           connectedAt: now(),
           lastSeen: now(),
-          lastFrame: null,
-          lastFrameWidth: null,
-          lastFrameHeight: null,
-          lastThumbAt: 0,
+          lastFrames: existing?.lastFrames || new Map(),
+          lastThumbAtByMonitor: existing?.lastThumbAtByMonitor || new Map(),
           subscribers: existing?.subscribers || new Set(),
           socket: ws
         };
@@ -201,16 +179,28 @@ wss.on('connection', (ws, req) => {
         if (Number.isFinite(msg.cpu)) device.cpu = msg.cpu;
         if (Number.isFinite(msg.ram)) device.ram = msg.ram;
         if (msg.screen) device.screen = msg.screen;
+        if (Array.isArray(msg.screens)) device.screens = msg.screens;
         broadcastDeviceList();
         return;
       }
 
       if (msg.type === 'agent:frame' && typeof msg.data === 'string') {
-        device.lastFrame = msg.data;
-        device.lastFrameWidth = msg.width;
-        device.lastFrameHeight = msg.height;
+        const monitorIndex = Number.isInteger(msg.monitorIndex) ? msg.monitorIndex : 0;
+        const frame = {
+          data: msg.data,
+          width: msg.width,
+          height: msg.height,
+          sourceWidth: msg.sourceWidth,
+          sourceHeight: msg.sourceHeight,
+          monitorIndex,
+          monitorId: msg.monitorId || `monitor-${monitorIndex}`,
+          monitorPrimary: Boolean(msg.monitorPrimary),
+          at: now()
+        };
+        device.lastFrames.set(monitorIndex, frame);
         const t = Date.now();
-        const shouldThumb = t - device.lastThumbAt >= 1800;
+        const lastThumbAt = device.lastThumbAtByMonitor.get(monitorIndex) || 0;
+        const shouldThumb = t - lastThumbAt >= 1800;
 
         for (const admin of admins) {
           const full = admin.socket.subscribedDeviceId === device.id;
@@ -218,24 +208,24 @@ wss.on('connection', (ws, req) => {
             safeSend(admin.socket, {
               type: full ? 'device:frame' : 'device:thumbnail',
               deviceId: device.id,
-              data: msg.data,
-              width: msg.width,
-              height: msg.height,
-              at: now()
+              monitorIndex,
+              monitorId: frame.monitorId,
+              monitorPrimary: frame.monitorPrimary,
+              data: frame.data,
+              width: frame.width,
+              height: frame.height,
+              sourceWidth: frame.sourceWidth,
+              sourceHeight: frame.sourceHeight,
+              at: frame.at
             });
           }
         }
-        if (shouldThumb) device.lastThumbAt = t;
+        if (shouldThumb) device.lastThumbAtByMonitor.set(monitorIndex, t);
         return;
       }
 
       if (msg.type === 'agent:event') {
-        for (const admin of admins) {
-          safeSend(admin.socket, {
-            type: 'device:event', deviceId: device.id,
-            event: msg.event, detail: msg.detail || '', at: now()
-          });
-        }
+        for (const admin of admins) safeSend(admin.socket, { type: 'device:event', deviceId: device.id, event: msg.event, detail: msg.detail || '', at: now() });
         broadcastLog(msg.detail || msg.event || 'Agent event', msg.ok === false ? 'error' : 'success', device.id);
       }
       return;
@@ -253,30 +243,30 @@ wss.on('connection', (ws, req) => {
         device.subscribers.add(ws);
         setAgentStreamMode(device);
         safeSend(ws, { type: 'device:subscribed', deviceId: msg.deviceId });
-        if (device.lastFrame) {
+        for (const frame of device.lastFrames.values()) {
           safeSend(ws, {
-            type: 'device:frame', deviceId: device.id,
-            data: device.lastFrame,
-            width: device.lastFrameWidth || device.screen?.width,
-            height: device.lastFrameHeight || device.screen?.height,
+            type: 'device:frame',
+            deviceId: device.id,
+            monitorIndex: frame.monitorIndex,
+            monitorId: frame.monitorId,
+            monitorPrimary: frame.monitorPrimary,
+            data: frame.data,
+            width: frame.width,
+            height: frame.height,
+            sourceWidth: frame.sourceWidth,
+            sourceHeight: frame.sourceHeight,
             at: now()
           });
         }
         return;
       }
 
-      if (msg.type === 'device:unsubscribe') {
-        unsubscribeAdmin(ws);
-        return;
-      }
+      if (msg.type === 'device:unsubscribe') { unsubscribeAdmin(ws); return; }
 
       if (msg.type === 'device:rename') {
         const deviceId = String(msg.deviceId || '').trim();
         const alias = String(msg.name || '').trim().slice(0, 80);
-        if (!deviceId || !devices.has(deviceId)) {
-          safeSend(ws, { type: 'error', message: 'Không tìm thấy thiết bị' });
-          return;
-        }
+        if (!deviceId || !devices.has(deviceId)) { safeSend(ws, { type: 'error', message: 'Không tìm thấy thiết bị' }); return; }
         deviceSettings[deviceId] = { ...settingFor(deviceId), alias };
         saveSettings();
         broadcastDeviceList();
@@ -287,10 +277,7 @@ wss.on('connection', (ws, req) => {
       if (msg.type === 'device:set-group') {
         const deviceId = String(msg.deviceId || '').trim();
         const group = String(msg.group || '').trim().slice(0, 80) || 'VN UTI';
-        if (!deviceId || !devices.has(deviceId)) {
-          safeSend(ws, { type: 'error', message: 'Không tìm thấy thiết bị' });
-          return;
-        }
+        if (!deviceId || !devices.has(deviceId)) { safeSend(ws, { type: 'error', message: 'Không tìm thấy thiết bị' }); return; }
         deviceSettings[deviceId] = { ...settingFor(deviceId), group };
         saveSettings();
         broadcastDeviceList();
@@ -303,26 +290,15 @@ wss.on('connection', (ws, req) => {
           safeSend(ws, { type: 'error', message: 'Không thể gửi lệnh: thiết bị offline' });
           return;
         }
-        const allowed = new Set([
-          'mouseMove', 'mouseClick', 'mouseDoubleClick',
-          'key', 'text', 'openUrl', 'screenshot', 'ping'
-        ]);
-        if (!allowed.has(msg.command)) {
-          safeSend(ws, { type: 'error', message: 'Lệnh không được hỗ trợ' });
-          return;
-        }
+        const allowed = new Set(['mouseMove','mouseClick','mouseDoubleClick','key','text','openUrl','screenshot','ping']);
+        if (!allowed.has(msg.command)) { safeSend(ws, { type: 'error', message: 'Lệnh không được hỗ trợ' }); return; }
         const commandId = crypto.randomUUID();
-        safeSend(device.socket, {
-          type: 'control:command', commandId,
-          command: msg.command, args: msg.args || {}
-        });
+        safeSend(device.socket, { type: 'control:command', commandId, command: msg.command, args: msg.args || {} });
         safeSend(ws, { type: 'command:queued', commandId, deviceId: msg.deviceId, command: msg.command });
         return;
       }
 
-      if (msg.type === 'device:list:request') {
-        safeSend(ws, { type: 'device:list', devices: Array.from(devices.values()).map(deviceSummary) });
-      }
+      if (msg.type === 'device:list:request') safeSend(ws, { type: 'device:list', devices: Array.from(devices.values()).map(deviceSummary) });
     }
   });
 
@@ -346,20 +322,14 @@ wss.on('connection', (ws, req) => {
 
 const heartbeat = setInterval(() => {
   for (const ws of wss.clients) {
-    if (ws.isAlive === false) {
-      try { ws.terminate(); } catch (_) {}
-      continue;
-    }
+    if (ws.isAlive === false) { try { ws.terminate(); } catch (_) {} continue; }
     ws.isAlive = false;
     try { ws.ping(); } catch (_) {}
   }
 }, 30000);
-
 wss.on('close', () => clearInterval(heartbeat));
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`[camera-pc] server listening on :${PORT}`);
-  if (ADMIN_TOKEN === 'change-me' || AGENT_TOKEN === 'change-agent-token') {
-    console.warn('[camera-pc] WARNING: using default tokens. Set ADMIN_TOKEN and AGENT_TOKEN before exposing to the Internet.');
-  }
+  if (ADMIN_TOKEN === 'change-me' || AGENT_TOKEN === 'change-agent-token') console.warn('[camera-pc] WARNING: using default tokens.');
 });
