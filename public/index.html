@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#07111f">
+  <title>PC Control Center</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div id="loginOverlay" class="login-overlay">
+    <form id="loginForm" class="login-card" autocomplete="off">
+      <div class="brand-mark">PC</div>
+      <h1>PC Control Center</h1>
+      <p>Kết nối Canvas Web với các PC Agent của bạn.</p>
+      <label for="adminToken">Admin token</label>
+      <input id="adminToken" type="password" placeholder="Nhập ADMIN_TOKEN" required>
+      <button class="btn primary wide" type="submit">Kết nối hệ thống</button>
+      <button id="demoBtn" class="btn ghost wide" type="button">Xem giao diện demo</button>
+      <small>Chỉ sử dụng trên các máy bạn sở hữu hoặc được phép quản trị.</small>
+      <div id="loginError" class="form-error" aria-live="polite"></div>
+    </form>
+  </div>
+
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark small">PC</div>
+        <div>
+          <strong>PC CONTROL CENTER</strong>
+          <span>Remote PC Management</span>
+        </div>
+      </div>
+
+      <nav>
+        <p class="nav-title">TỔNG QUAN</p>
+        <button class="nav-item active" data-view="dashboard"><span>⌂</span> Dashboard</button>
+        <button class="nav-item" data-view="devices"><span>▣</span> PC & Thiết bị</button>
+        <button class="nav-item" data-view="users"><span>♙</span> Người dùng</button>
+        <button class="nav-item" data-view="groups"><span>◫</span> Nhóm thiết bị</button>
+        <button class="nav-item" data-view="history"><span>◴</span> Lịch sử hoạt động</button>
+
+        <p class="nav-title">ĐIỀU KHIỂN</p>
+        <button class="nav-item" data-view="screen"><span>▰</span> Xem màn hình</button>
+        <button class="nav-item" data-view="workflow"><span>⌘</span> Canvas Workflow <em>New</em></button>
+        <button class="nav-item" data-view="files"><span>▱</span> Tệp tin</button>
+        <button class="nav-item" data-view="quick"><span>⌁</span> Lệnh nhanh</button>
+
+        <p class="nav-title">CÀI ĐẶT</p>
+        <button class="nav-item" data-view="settings"><span>⚙</span> Cài đặt hệ thống</button>
+        <button class="nav-item" data-view="security"><span>◇</span> Cài đặt bảo mật</button>
+      </nav>
+
+      <div class="agent-card">
+        <div class="agent-head"><strong>PC Agent</strong><span id="serverStatus" class="status-pill offline">Offline</span></div>
+        <p>Gateway: <b id="gatewayLabel">Chưa kết nối</b></p>
+        <p>Phiên bản UI: <b>0.1.0</b></p>
+        <p>Thiết bị online: <b id="agentOnlineCount">0</b></p>
+        <button id="refreshBtn" class="btn ghost wide" type="button">Tải lại danh sách</button>
+      </div>
+    </aside>
+
+    <main>
+      <header class="topbar">
+        <div class="search-box">
+          <span>⌕</span>
+          <input id="searchInput" type="search" placeholder="Tìm kiếm PC, nhóm, người dùng...">
+        </div>
+        <div class="top-stats">
+          <div><span>Tổng PC</span><strong id="totalCount">0</strong></div>
+          <div><span>Online</span><strong id="onlineCount">0</strong></div>
+          <div><span>Offline</span><strong id="offlineCount">0</strong></div>
+          <div><span>Đang điều khiển</span><strong id="controlCount">0</strong></div>
+        </div>
+        <div class="admin-chip"><div class="avatar">G</div><div><strong>Giang Admin</strong><span>Quản trị viên</span></div></div>
+      </header>
+
+      <section class="workspace">
+        <div class="left-column">
+          <section class="panel device-panel">
+            <div class="panel-head">
+              <div><h2>DANH SÁCH PC <span id="deviceRatio">(0/0 ONLINE)</span></h2></div>
+              <div class="toolbar">
+                <button id="filterAll" class="chip active" type="button">Tất cả</button>
+                <button id="filterOnline" class="chip" type="button">Online</button>
+                <button id="filterOffline" class="chip" type="button">Offline</button>
+                <button id="addPcBtn" class="chip" type="button">＋ Thêm PC</button>
+              </div>
+            </div>
+            <div id="deviceGrid" class="device-grid"></div>
+            <div id="emptyState" class="empty-state hidden">
+              <div class="empty-icon">▣</div>
+              <h3>Chưa có PC Agent online</h3>
+              <p>Cài Agent trên Windows và kết nối về VPS để máy xuất hiện ở đây.</p>
+              <button id="emptyDemoBtn" class="btn ghost" type="button">Hiện dữ liệu demo</button>
+            </div>
+          </section>
+
+          <section class="panel workflow-panel">
+            <div class="panel-head compact">
+              <h2>CANVAS WORKFLOW</h2>
+              <div class="toolbar">
+                <button id="newWorkflowBtn" class="chip" type="button">＋ Tạo mới</button>
+                <button id="runWorkflowBtn" class="chip run" type="button">▶ Chạy</button>
+                <span class="zoom-label">100%</span>
+              </div>
+            </div>
+            <div class="canvas-wrap">
+              <svg class="workflow-lines" viewBox="0 0 1000 240" preserveAspectRatio="none" aria-hidden="true">
+                <path d="M135 70 C175 70, 190 70, 225 70"/>
+                <path d="M365 70 C405 70, 420 70, 455 70"/>
+                <path d="M595 70 C635 70, 650 70, 685 70"/>
+                <path d="M820 70 C870 70, 890 130, 890 165"/>
+                <path d="M820 175 C730 175, 690 175, 610 175"/>
+                <path d="M455 175 C375 175, 330 175, 245 175"/>
+              </svg>
+              <div class="node start" style="--x:2%;--y:14%"><span>◷</span><div><b>Bắt đầu</b><small>Schedule</small></div></div>
+              <div class="node device" style="--x:24%;--y:14%"><span>▰</span><div><b id="workflowDevice">Chọn PC</b><small>Kết nối</small></div></div>
+              <div class="node app" style="--x:47%;--y:14%"><span>▱</span><div><b>Mở Chrome</b><small>chrome.exe</small></div></div>
+              <div class="node action" style="--x:70%;--y:14%"><span>◉</span><div><b>Mở Facebook</b><small>facebook.com</small></div></div>
+              <div class="node action pink" style="--x:80%;--y:62%"><span>↗</span><div><b>Đăng bài</b><small>Tác vụ mẫu</small></div></div>
+              <div class="node capture" style="--x:48%;--y:62%"><span>▣</span><div><b>Chụp màn hình</b><small>Lưu kết quả</small></div></div>
+              <div class="node end" style="--x:10%;--y:62%"><span>＋</span><div><b>Kết thúc</b><small>Thông báo</small></div></div>
+            </div>
+            <div class="legend"><span>○ Bắt đầu / Kết thúc</span><span>▰ Thiết bị</span><span>▱ Ứng dụng</span><span>◉ Hành động</span><span>▣ Kết quả</span></div>
+          </section>
+        </div>
+
+        <div class="right-column">
+          <section class="panel remote-panel">
+            <div class="remote-head">
+              <div><h2 id="remoteTitle">CHỌN MỘT PC</h2><span id="remoteOnline" class="status-pill offline">Offline</span></div>
+              <button id="closeRemoteBtn" class="icon-btn" type="button">×</button>
+            </div>
+
+            <div id="remoteSurface" class="remote-surface" role="application" tabindex="0" aria-label="Màn hình điều khiển từ xa">
+              <img id="remoteImage" alt="Màn hình PC từ xa">
+              <div id="remotePlaceholder" class="remote-placeholder"><span>▰</span><p>Chọn PC để xem màn hình</p></div>
+              <div class="remote-overlay"><span id="latencyLabel">-- ms</span><span id="resolutionLabel">--</span></div>
+            </div>
+
+            <div class="remote-actions">
+              <button id="connectBtn" class="btn primary" type="button">Kết nối điều khiển</button>
+              <button id="disconnectBtn" class="btn danger" type="button">Ngắt kết nối</button>
+              <button id="screenshotBtn" class="btn ghost" type="button">Chụp màn hình</button>
+            </div>
+
+            <div class="quick-control">
+              <label for="urlInput">Mở URL trên PC</label>
+              <div class="inline-control"><input id="urlInput" type="url" value="https://facebook.com"><button id="openUrlBtn" class="btn ghost" type="button">Mở</button></div>
+              <label for="textInput">Nhập văn bản vào PC</label>
+              <div class="inline-control"><input id="textInput" type="text" placeholder="Nội dung cần gõ..."><button id="sendTextBtn" class="btn ghost" type="button">Gửi</button></div>
+            </div>
+
+            <div class="tabs"><button class="active" type="button">Thông tin</button><button type="button">Cấu hình</button><button type="button">Lệnh nhanh</button></div>
+            <dl class="device-info">
+              <div><dt>Tên thiết bị</dt><dd id="infoName">--</dd></div>
+              <div><dt>IP</dt><dd id="infoIp">--</dd></div>
+              <div><dt>Nhóm</dt><dd id="infoGroup">--</dd></div>
+              <div><dt>Hệ điều hành</dt><dd id="infoPlatform">--</dd></div>
+              <div><dt>Người dùng</dt><dd id="infoUser">--</dd></div>
+              <div><dt>Độ phân giải</dt><dd id="infoScreen">--</dd></div>
+            </dl>
+          </section>
+
+          <section class="panel log-panel">
+            <div class="panel-head compact"><h2>NHẬT KÝ HOẠT ĐỘNG</h2><button id="clearLogBtn" class="link-btn" type="button">Xóa</button></div>
+            <div id="logList" class="log-list" aria-live="polite"></div>
+          </section>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast" class="toast" aria-live="polite"></div>
+  <script src="/app.js"></script>
+</body>
+</html>
