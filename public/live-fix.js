@@ -156,6 +156,23 @@
 
   window.WebSocket = ResilientWebSocket;
 
+  const simplifyStyle = document.createElement('style');
+  simplifyStyle.textContent = `
+    .workflow-panel,
+    .nav-item[data-view="workflow"],
+    .nav-item[data-view="files"],
+    .nav-item[data-view="quick"],
+    .nav-item[data-view="settings"],
+    .nav-item[data-view="security"] {
+      display: none !important;
+    }
+    nav .nav-title:last-of-type {
+      display: none !important;
+    }
+    .left-column { gap: 0 !important; }
+  `;
+  document.head.appendChild(simplifyStyle);
+
   document.addEventListener('click', (event) => {
     const card = event.target.closest('.device-card');
     if (!card || !card.dataset.deviceId) return;
