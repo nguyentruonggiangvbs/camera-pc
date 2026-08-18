@@ -49,19 +49,24 @@
         this.extensions = ws.extensions || '';
         this.retryCount = 0;
         this.dispatchEvent(new Event('open'));
-
-        if (this.lastSubscription) {
-          setTimeout(() => {
-            if (this.readyState === NativeWebSocket.OPEN && this.socket === ws && this.lastSubscription) {
-              try { ws.send(this.lastSubscription); } catch (_) {}
-            }
-          }, 350);
-        }
       });
 
       ws.addEventListener('message', (event) => {
         if (this.socket !== ws || this.manualClose) return;
         this.dispatchEvent(new MessageEvent('message', { data: event.data, origin: event.origin, lastEventId: event.lastEventId }));
+
+        if (typeof event.data === 'string' && this.lastSubscription) {
+          try {
+            const msg = JSON.parse(event.data);
+            if (msg.type === 'auth:ok') {
+              setTimeout(() => {
+                if (this.socket === ws && ws.readyState === NativeWebSocket.OPEN && this.lastSubscription) {
+                  try { ws.send(this.lastSubscription); } catch (_) {}
+                }
+              }, 80);
+            }
+          } catch (_) {}
+        }
       });
 
       ws.addEventListener('error', () => {
@@ -73,24 +78,18 @@
         if (this.socket !== ws) return;
         this.socket = null;
         this.readyState = NativeWebSocket.CLOSED;
-
         if (this.manualClose || event.code === 4004) {
           instances.delete(this);
-          this.dispatchEvent(new CloseEvent('close', {
-            code: event.code,
-            reason: event.reason,
-            wasClean: event.wasClean
-          }));
+          this.dispatchEvent(new CloseEvent('close', { code: event.code, reason: event.reason, wasClean: event.wasClean }));
           return;
         }
-
         this.scheduleReconnect();
       });
     }
 
     scheduleReconnect() {
       if (this.manualClose) return;
-      const delays = [1000, 2000, 5000, 5000, 5000];
+      const delays = [700, 1200, 2500, 5000, 5000];
       const delay = delays[Math.min(this.retryCount, delays.length - 1)];
       this.retryCount += 1;
       clearTimeout(this.retryTimer);
@@ -101,14 +100,10 @@
       if (typeof data === 'string') {
         try {
           const msg = JSON.parse(data);
-          if (msg.type === 'device:subscribe' && msg.deviceId) {
-            this.lastSubscription = data;
-          } else if (msg.type === 'device:unsubscribe') {
-            this.lastSubscription = null;
-          }
+          if (msg.type === 'device:subscribe' && msg.deviceId) this.lastSubscription = data;
+          else if (msg.type === 'device:unsubscribe') this.lastSubscription = null;
         } catch (_) {}
       }
-
       if (!this.socket || this.socket.readyState !== NativeWebSocket.OPEN) {
         throw new DOMException('WebSocket is not open', 'InvalidStateError');
       }
@@ -124,33 +119,7 @@
       } else {
         this.readyState = NativeWebSocket.CLOSED;
         instances.delete(this);
-        this.dispatchEvent(new CloseEvent('close', { code: code || 1000, reason: reason || '', wasClean: true }));
       }
-    }
-
-    get onopen() { return this._onopen || null; }
-    set onopen(fn) {
-      if (this._onopen) this.removeEventListener('open', this._onopen);
-      this._onopen = fn;
-      if (fn) this.addEventListener('open', fn);
-    }
-    get onmessage() { return this._onmessage || null; }
-    set onmessage(fn) {
-      if (this._onmessage) this.removeEventListener('message', this._onmessage);
-      this._onmessage = fn;
-      if (fn) this.addEventListener('message', fn);
-    }
-    get onerror() { return this._onerror || null; }
-    set onerror(fn) {
-      if (this._onerror) this.removeEventListener('error', this._onerror);
-      this._onerror = fn;
-      if (fn) this.addEventListener('error', fn);
-    }
-    get onclose() { return this._onclose || null; }
-    set onclose(fn) {
-      if (this._onclose) this.removeEventListener('close', this._onclose);
-      this._onclose = fn;
-      if (fn) this.addEventListener('close', fn);
     }
   }
 
@@ -163,29 +132,27 @@
     .nav-item[data-view="files"],
     .nav-item[data-view="quick"],
     .nav-item[data-view="settings"],
-    .nav-item[data-view="security"] {
-      display: none !important;
-    }
-    nav .nav-title:last-of-type {
-      display: none !important;
-    }
-    .left-column { gap: 0 !important; }
+    .nav-item[data-view="security"] { display:none!important; }
+    nav .nav-title:last-of-type { display:none!important; }
+    .left-column { gap:0!important; }
   `;
   document.head.appendChild(simplifyStyle);
 
   document.addEventListener('click', (event) => {
     const card = event.target.closest('.device-card');
-    if (!card || !card.dataset.deviceId) return;
-
+    if (!card || !card.dataset.deviceId || event.target.closest('.device-rename-btn')) return;
     const socket = window.__cameraPcSocket;
     if (!socket || socket.readyState !== NativeWebSocket.OPEN) return;
-
     const deviceId = card.dataset.deviceId;
     setTimeout(() => {
-      try {
-        socket.send(JSON.stringify({ type: 'device:subscribe', deviceId }));
-      } catch (_) {}
+      try { socket.send(JSON.stringify({ type: 'device:subscribe', deviceId })); } catch (_) {}
     }, 0);
+  });
+
+  window.addEventListener('DOMContentLoaded', () => {
+    const script = document.createElement('script');
+    script.src = 'admin-enhance.js?v=20260819-1';
+    document.body.appendChild(script);
   });
 
   window.addEventListener('beforeunload', () => {
