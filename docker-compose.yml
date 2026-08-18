@@ -1,0 +1,9 @@
+services:
+  camera-pc:
+    build: .
+    container_name: camera-pc
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
